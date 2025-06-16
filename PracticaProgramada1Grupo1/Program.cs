@@ -6,10 +6,7 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configuración de JWT 
-
-// NO SE UTILIZÓ LA AUTENTICACIÓN PERO, PARA CUESTIONES DE PRACTICA, SE REALIZÓ COMO SE VIÓ EN CLASE LA CONFIGURACION DE ESTA.
-
+// Configuración de JWT
 var key = "EstaEsUnaClaveSecretaParaFirmarElTokenJWT";
 var issuer = "https://localhost:5001";
 var audience = "https://localhost:5001";
@@ -30,14 +27,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
-
-// Servicios de Swagger/OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Configuración de la canalización de solicitudes HTTP
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -48,8 +42,14 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Datos simulados: usuarios
+var usuarios = new List<Auth>
+{
+    new("admin", "1234"),
+    new("usuario", "abcd")
+};
 
-// LISTA PARA SIMULAR BD DE PRUEBA
+// Datos simulados: vehículos
 var vehiculos = new List<Vehiculo>
 {
     new(1, "Toyota", "XX", "VWY001", 2023, "Gris", 16000, "Carro nuevo"),
@@ -58,7 +58,40 @@ var vehiculos = new List<Vehiculo>
     new(4, "Honda", "XX", "SKJ290", 2021, "Gris", 14000, "Carro nuevo"),
 };
 
-// Endpoints de la API de vehículos
+// Login: genera token JWT
+app.MapPost("/login", (Auth datosLogin) =>
+{
+    var usuario = usuarios.FirstOrDefault(u =>
+        u.Usuario == datosLogin.Usuario && u.Contrasenna == datosLogin.Contrasenna);
+
+    if (usuario is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var tokenHandler = new JwtSecurityTokenHandler();
+    var clave = Encoding.UTF8.GetBytes(key);
+
+    var tokenDescriptor = new SecurityTokenDescriptor
+    {
+        Subject = new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, usuario.Usuario) }),
+        Expires = DateTime.UtcNow.AddHours(1),
+        Issuer = issuer,
+        Audience = audience,
+        SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(clave), SecurityAlgorithms.HmacSha256Signature)
+    };
+
+    var token = tokenHandler.CreateToken(tokenDescriptor);
+    var tokenString = tokenHandler.WriteToken(token);
+
+    return Results.Ok(new { token = tokenString });
+})
+.WithName("Login")
+.WithSummary("Inicio de sesión")
+.WithDescription("Genera un token JWT si las credenciales son válidas.");
+
+
+// GET todos los vehículos (abierto)
 app.MapGet("/api/vehiculo", () => Results.Ok(vehiculos))
     .WithTags("Vehiculo")
     .WithName("GetVehiculos")
@@ -66,7 +99,7 @@ app.MapGet("/api/vehiculo", () => Results.Ok(vehiculos))
     .WithDescription("Devuelve una lista completa de vehículos.")
     .WithOpenApi();
 
-// GET POR PLACA
+// GET por placa (abierto)
 app.MapGet("/{placa}", (string placa) =>
 {
     var vehiculo = vehiculos.FirstOrDefault(v => v.Placa == placa);
@@ -74,10 +107,9 @@ app.MapGet("/{placa}", (string placa) =>
 })
 .WithName("GetVehiculo")
 .WithSummary("Obtiene un vehículo por su placa")
-.WithDescription("Esta API devuelve los detalles de un vehículo específico basado en su placa.");
+.WithDescription("Devuelve los detalles de un vehículo basado en su placa.");
 
-
-//POST AÑADE NUEVO VEHÍCULO
+// POST nuevo vehículo (requiere autenticación)
 app.MapPost("/", (Vehiculo vehiculo) =>
 {
     if (vehiculos.Any(v => v.Placa == vehiculo.Placa))
@@ -87,12 +119,12 @@ app.MapPost("/", (Vehiculo vehiculo) =>
     vehiculos.Add(vehiculo);
     return Results.Created($"/api/vehiculo/{vehiculo.Placa}", vehiculo);
 })
+.RequireAuthorization()
 .WithName("PostVehiculo")
 .WithSummary("Añade un nuevo vehículo")
-.WithDescription("Esta API permite añadir un nuevo vehículo a la lista.");
+.WithDescription("Permite añadir un nuevo vehículo a la lista.");
 
-
-//PUT ACTUALIZA VEHÍCULO
+// PUT actualizar vehículo (requiere autenticación)
 app.MapPut("/{placa}", (string placa, Vehiculo vehiculoActualizado) =>
 {
     var vehiculo = vehiculos.FirstOrDefault(v => v.Placa == placa);
@@ -108,12 +140,12 @@ app.MapPut("/{placa}", (string placa, Vehiculo vehiculoActualizado) =>
     vehiculo.Descripcion = vehiculoActualizado.Descripcion;
     return Results.Ok(vehiculo);
 })
+.RequireAuthorization()
 .WithName("PutVehiculo")
 .WithSummary("Actualiza los detalles de un vehículo")
-.WithDescription("Esta API permite actualizar los detalles de un vehículo existente.");
+.WithDescription("Permite actualizar los datos de un vehículo existente.");
 
-
-// DELETE UN VEHÍCULO
+// DELETE un vehículo (requiere autenticación)
 app.MapDelete("/{placa}", (string placa) =>
 {
     var vehiculo = vehiculos.FirstOrDefault(v => v.Placa == placa);
@@ -124,13 +156,14 @@ app.MapDelete("/{placa}", (string placa) =>
     vehiculos.Remove(vehiculo);
     return Results.NoContent();
 })
+.RequireAuthorization()
 .WithName("DeleteVehiculo")
-.WithSummary("Elimina un vehículo por su placa")
-.WithDescription("Esta API permite eliminar un vehículo específico de la lista utilizando su placa.");
-
+.WithSummary("Elimina un vehículo")
+.WithDescription("Permite eliminar un vehículo por su placa.");
 
 app.Run();
 
+// Modelos
 internal record Vehiculo
 {
     public int Id { get; set; }
